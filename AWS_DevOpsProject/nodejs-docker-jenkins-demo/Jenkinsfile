@@ -1,0 +1,64 @@
+pipeline {
+agent any
+
+    environment {
+        AWS_REGION = "eu-west-1"
+        ECR_REPO   = "468284643546.dkr.ecr.eu-west-1.amazonaws.com/node-app-repo"
+        IMAGE      = "${ECR_REPO}:latest"
+        APP_HOST   = ""
+        CONTAINER  = "vote-app"
+    }
+
+    stages {
+
+        stage('Build & Push Image to ECR') {
+            steps {
+                sh '''
+                echo "Logging in to ECR..."
+                aws ecr get-login-password --region eu-west-1 \
+                | docker login --username AWS --password-stdin 468284643546.dkr.ecr.eu-west-1.amazonaws.com
+
+                echo "Building Docker image..."
+                cd vote
+                docker build -t $IMAGE .
+
+                echo "Pushing image to ECR..."
+                docker push $IMAGE
+                '''
+            }
+        }
+
+        stage('Deploy to App EC2') {
+    steps {
+        sshagent(['app-host-ssh']) {
+            sh """
+            ssh -o StrictHostKeyChecking=no ubuntu@10.0.4.224 '
+              docker stop vote-app || true
+              docker rm vote-app || true
+
+              aws ecr get-login-password --region eu-west-1 \
+              | docker login --username AWS --password-stdin 468284643546.dkr.ecr.eu-west-1.amazonaws.com
+
+              docker pull 468284643546.dkr.ecr.eu-west-1.amazonaws.com/node-app-repo:latest
+
+              docker run -d --name vote-app -p 80:80 \
+              468284643546.dkr.ecr.eu-west-1.amazonaws.com/node-app-repo:latest
+            '
+            """
+        }
+    }
+
+}
+
+    }
+
+    post {
+        success {
+            echo "✅ Subtask-3 completed successfully"
+        }
+        failure {
+            echo "❌ Deployment failed"
+        }
+    }
+
+}

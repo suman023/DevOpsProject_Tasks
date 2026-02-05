@@ -89,7 +89,7 @@
 | ECR (container registry) | $1.40 |
 
 ### Cost Distribution:
-
+```
 Total Monthly: $129.88
 
 ├── NAT Gateway: $37.35 (29%)
@@ -100,10 +100,10 @@ Total Monthly: $129.88
 ├── Bastion EC2: $9.19 (7%)
 └── Storage/Other: $1.44 (1%)
 
-
+```
 
 ## Codebase Structure:
-
+```
 terraform-backend/
 └── main.tf
 
@@ -143,7 +143,7 @@ ansible-config/
 └── playbooks/
     └── install-docker.yml
 
-
+```
 
 
 

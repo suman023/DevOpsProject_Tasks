@@ -1,9 +1,9 @@
 # DevOpsProject_Tasks
 UpGrad Tasks
 
-#☁️ AWS Tasks Summary
+☁️ AWS Tasks Summary:
 
-This project involved the complete setup and utilization of AWS services to design, deploy, and manage a secure and automated cloud infrastructure. A custom Virtual Private Cloud (VPC) was created with both public and private subnets distributed across multiple Availability Zones to ensure high availability and fault tolerance. Internet connectivity was enabled using an Internet Gateway for public resources and a NAT Gateway for private resources.
+This project involved the complete setup and use of AWS services to design, deploy, and manage a secure, automated cloud infrastructure. A custom Virtual Private Cloud (VPC) was created with both public and private subnets distributed across multiple Availability Zones to ensure high availability and fault tolerance. Internet connectivity was enabled using an Internet Gateway for public resources and a NAT Gateway for private resources.
 
 Compute resources were provisioned using Amazon EC2, including a Bastion host for secure access, a Jenkins server for CI/CD operations, and an Application server for running the containerized application. Security was enforced through carefully configured Security Groups, ensuring least-privilege access between components.
 

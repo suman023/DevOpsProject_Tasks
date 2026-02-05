@@ -114,7 +114,7 @@ nodejs-docker-jenkins-demo/
 
 ## ⚙️ How to Execute the Project
 ```
-Terraform (Task-1)
+Terraform (Task-1):
 cd terraform-backend
 terraform init
 terraform apply
@@ -124,13 +124,12 @@ terraform init
 terraform plan
 terraform apply
 
-Ansible (Task-2)
+Ansible (Task-2):
 cd ansible-config
 ansible all -m ping
 ansible-playbook playbooks/install-docker.yml
 
-Jenkins (Task-3)
-
+Jenkins (Task-3):
 Configure Jenkins Pipeline using Jenkinsfile
 Trigger Build Now
 Application gets deployed automatically on App EC2

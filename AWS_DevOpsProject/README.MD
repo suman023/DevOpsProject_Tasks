@@ -84,6 +84,18 @@ terraform-aws-infra/
 
 ---
 
+
+---
+
+### 🔹 Ansible Configuration (Task-2)
+
+ansible-config/
+├── inventory/
+│ └── hosts.ini
+└── playbooks/
+└── install-docker.yml 
+
+
 ### 🔹 Application & CI/CD (Task-3)
 nodejs-docker-jenkins-demo/
 ├── vote/

@@ -113,7 +113,7 @@ nodejs-docker-jenkins-demo/
 ---
 
 ## ⚙️ How to Execute the Project
-
+```
 Terraform (Task-1)
 cd terraform-backend
 terraform init

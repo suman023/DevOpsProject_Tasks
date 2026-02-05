@@ -89,7 +89,7 @@
 
 
 
-## 💻 Cost Breakdown by Component
+## 💻 Cost Breakdown by Component:
 
 ### EC2 Instances: $58.74/month (45%)
 
@@ -115,10 +115,7 @@
 | DynamoDB (state locking) | $0.02 |
 | ECR (container registry) | $1.40 |
 
----
-
-## 📈 Cost Distribution
-
+## 📈 Cost Distribution:
 
 Total Monthly: $129.88
 
@@ -129,9 +126,10 @@ Total Monthly: $129.88
 ├── Data Transfer: $13.70 (11%)
 ├── Bastion EC2: $9.19 (7%)
 └── Storage/Other: $1.44 (1%)
-```
 
-```
+
+
+
 ## Codebase Structure
 
 terraform-backend/
@@ -172,8 +170,6 @@ ansible-config/
 │   └── hosts.ini
 └── playbooks/
     └── install-docker.yml
-
-```
 
 
 

@@ -66,7 +66,7 @@ Used to create:
 ---
 
 ### 🔹 Terraform Infrastructure (Task-1)
-
+```
 terraform-aws-infra/
 ├── backend.tf
 ├── provider.tf
@@ -80,7 +80,7 @@ terraform-aws-infra/
 ├── ec2.tf
 ├── alb.tf
 └── outputs.tf
-
+```
 
 ---
 
@@ -88,15 +88,16 @@ terraform-aws-infra/
 ---
 
 ### 🔹 Ansible Configuration (Task-2)
-
+```
 ansible-config/
 ├── inventory/
 │ └── hosts.ini
 └── playbooks/
 └── install-docker.yml 
 
-
+```
 ### 🔹 Application & CI/CD (Task-3)
+```
 nodejs-docker-jenkins-demo/
 ├── vote/
 │ ├── app.py
@@ -108,11 +109,11 @@ nodejs-docker-jenkins-demo/
 │ └── stylesheets/
 │ └── style.css
 └── Jenkinsfile
-
+```
 ---
 
 ## ⚙️ How to Execute the Project
-
+---
 ### Terraform (Task-1)
 ```bash
 cd terraform-backend

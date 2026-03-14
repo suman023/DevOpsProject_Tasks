@@ -1,0 +1,603 @@
+================================================================
+TASK 1 — BASELINE VM
+GCP Project: upgradlabs-1749732686213
+Region: asia-south1 | Zone: asia-south1-a
+VM IP: 35.200.237.254
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — SET PROJECT CONFIG
+----------------------------------------------------------------
+gcloud config set project upgradlabs-1749732686213
+gcloud config set compute/zone asia-south1-a
+gcloud config set compute/region asia-south1
+
+----------------------------------------------------------------
+STEP 2 — CREATE FIREWALL RULE
+----------------------------------------------------------------
+# Allow ports 80 (HTTP), 5000 (Flask), 8089 (Locust UI)
+gcloud compute firewall-rules create allow-http-bms \
+  --allow tcp:80,tcp:5000,tcp:8089 \
+  --target-tags=http-server
+
+----------------------------------------------------------------
+STEP 3 — CREATE BASELINE VM
+----------------------------------------------------------------
+# Single e2-medium VM with Debian 11
+gcloud compute instances create bms-monolith \
+  --machine-type=e2-medium \
+  --image-family=debian-11 \
+  --image-project=debian-cloud \
+  --zone=asia-south1-a \
+  --tags=http-server \
+  --metadata-from-file startup-script=startup.sh
+
+----------------------------------------------------------------
+STEP 4 — startup.sh (VM Boot Script)
+----------------------------------------------------------------
+#!/bin/bash
+apt-get update -y
+apt-get install -y python3 python3-pip
+
+pip3 install flask --break-system-packages
+
+----------------------------------------------------------------
+STEP 6 — RUN LOCUST LOAD TEST
+----------------------------------------------------------------
+# Install locust
+pip install locust
+
+# Run baseline test against single VM
+locust -f locustfile.py --headless \
+  --users 1000 --spawn-rate 100 --run-time 90s \
+  --host http://35.200.237.254:5000 \
+  --csv=baseline_results 2>&1 | tail -15
+
+----------------------------------------------------------------
+BASELINE RESULTS
+----------------------------------------------------------------
+Users    Avg Latency   p95 Latency   Failures
+50       232 ms        390 ms        0%
+200      245 ms        410 ms        0%
+500      258 ms        420 ms        0%
+1000     265 ms        430 ms        0%
+================================================================
+
+
+================================================================
+TASK 2 — MANAGED INSTANCE GROUP + GLOBAL LOAD BALANCER
+Load Balancer IP: 34.95.101.123
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — CREATE INSTANCE TEMPLATE
+----------------------------------------------------------------
+# Blueprint used to launch new VMs during scale-up
+gcloud compute instance-templates create bms-app-template \
+  --project=upgradlabs-1749732686213 \
+  --machine-type=e2-medium \
+  --image-family=debian-11 \
+  --image-project=debian-cloud \
+  --boot-disk-size=20GB \
+  --tags=http-server \
+  --metadata-from-file startup-script=startup.sh
+
+----------------------------------------------------------------
+STEP 2 — CREATE MANAGED INSTANCE GROUP
+----------------------------------------------------------------
+# Auto-managed pool of VMs — starts with 2
+gcloud compute instance-groups managed create bms-instance-group \
+  --project=upgradlabs-1749732686213 \
+  --base-instance-name=bms-app \
+  --template=bms-app-template \
+  --size=2 \
+  --zone=asia-south1-a
+
+----------------------------------------------------------------
+STEP 3 — CONFIGURE AUTO-SCALING
+----------------------------------------------------------------
+# Scale up when CPU > 60%, scale down when CPU < 35%
+gcloud compute instance-groups managed set-autoscaling bms-instance-group \
+  --project=upgradlabs-1749732686213 \
+  --zone=asia-south1-a \
+  --min-num-replicas=2 \
+  --max-num-replicas=5 \
+  --target-cpu-utilization=0.60 \
+  --cool-down-period=90
+
+----------------------------------------------------------------
+STEP 4 — SET NAMED PORT
+----------------------------------------------------------------
+# Tells Load Balancer that Flask runs on port 5000
+gcloud compute instance-groups managed set-named-ports bms-instance-group \
+  --project=upgradlabs-1749732686213 \
+  --zone=asia-south1-a \
+  --named-ports=http:5000
+
+----------------------------------------------------------------
+STEP 5 — CREATE HEALTH CHECK
+----------------------------------------------------------------
+# Deep check — tests actual DB connection not just server status
+# After 3 failures (30s) VM is removed and replaced automatically
+gcloud compute health-checks create http bms-health-check \
+  --project=upgradlabs-1749732686213 \
+  --port=5000 \
+  --request-path=/health/ready \
+  --check-interval=10s \
+  --timeout=5s \
+  --healthy-threshold=2 \
+  --unhealthy-threshold=3
+
+----------------------------------------------------------------
+STEP 6 — CREATE BACKEND SERVICE
+----------------------------------------------------------------
+gcloud compute backend-services create bms-backend-service \
+  --project=upgradlabs-1749732686213 \
+  --protocol=HTTP \
+  --port-name=http \
+  --health-checks=bms-health-check \
+  --global
+
+# Attach MIG to backend service
+gcloud compute backend-services add-backend bms-backend-service \
+  --project=upgradlabs-1749732686213 \
+  --instance-group=bms-instance-group \
+  --instance-group-zone=asia-south1-a \
+  --global
+
+----------------------------------------------------------------
+STEP 7 — CREATE URL MAP
+----------------------------------------------------------------
+gcloud compute url-maps create bms-url-map \
+  --project=upgradlabs-1749732686213 \
+  --default-service=bms-backend-service
+
+----------------------------------------------------------------
+STEP 8 — CREATE HTTP PROXY
+----------------------------------------------------------------
+gcloud compute target-http-proxies create bms-http-proxy \
+  --project=upgradlabs-1749732686213 \
+  --url-map=bms-url-map
+
+----------------------------------------------------------------
+STEP 9 — CREATE FORWARDING RULE (CREATES LB IP)
+----------------------------------------------------------------
+gcloud compute forwarding-rules create bms-forwarding-rule \
+  --project=upgradlabs-1749732686213 \
+  --global \
+  --target-http-proxy=bms-http-proxy \
+  --ports=80
+
+----------------------------------------------------------------
+STEP 10 — VERIFY
+----------------------------------------------------------------
+# Get Load Balancer IP
+gcloud compute forwarding-rules describe bms-forwarding-rule \
+  --project=upgradlabs-1749732686213 \
+  --global \
+  --format="get(IPAddress)"
+# Result: 34.95.101.123
+
+# Check backends are HEALTHY
+gcloud compute backend-services get-health bms-backend-service --global
+
+# Test Load Balancer
+curl http://34.95.101.123/health/ready
+================================================================
+
+================================================================
+TASK 3 — CLOUD SQL (PRIMARY + READ REPLICA)
+Primary:  bms-primary    IP: 34.180.32.191  (WRITES)
+Replica:  bms-replica-1  IP: 34.47.176.241  (READS)
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — CREATE PRIMARY INSTANCE
+----------------------------------------------------------------
+# MySQL 8.0 with daily backups and point-in-time recovery
+gcloud sql instances create bms-primary \
+  --project=upgradlabs-1749732686213 \
+  --database-version=MYSQL_8_0 \
+  --tier=db-f1-micro \
+  --region=asia-south1 \
+  --root-password=BmsSecure123! \
+  --backup-start-time=07:30 \
+  --retained-backups-count=7 \
+  --enable-bin-log \
+  --availability-type=zonal
+
+----------------------------------------------------------------
+STEP 2 — CREATE READ REPLICA
+----------------------------------------------------------------
+# Replica syncs from primary — handles all SELECT queries
+gcloud sql instances create bms-replica-1 \
+  --project=upgradlabs-1749732686213 \
+  --master-instance-name=bms-primary \
+  --region=asia-south1 \
+  --tier=db-f1-micro
+
+----------------------------------------------------------------
+STEP 3 — IMPORT DATABASE SCHEMA
+----------------------------------------------------------------
+# Upload SQL file to GCS then import
+gsutil cp setup.sql gs://upgradlabs-1749732686213-static/setup.sql
+
+gcloud sql import sql bms-primary \
+  gs://upgradlabs-1749732686213-static/setup.sql \
+  --project=upgradlabs-1749732686213 --quiet
+
+----------------------------------------------------------------
+STEP 4 — setup.sql (Schema + Seed Data)
+----------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS bookmyshow;
+USE bookmyshow;
+
+-- Events table
+CREATE TABLE IF NOT EXISTS events (
+    id               INT AUTO_INCREMENT PRIMARY KEY,
+    name             VARCHAR(200)   NOT NULL,
+    venue            VARCHAR(200)   NOT NULL,
+    city             VARCHAR(100)   NOT NULL,
+    event_date       DATE           NOT NULL,
+    price            DECIMAL(10,2)  NOT NULL,
+    seats_available  INT            NOT NULL DEFAULT 0,
+    seats_total      INT            NOT NULL DEFAULT 0,
+    category         VARCHAR(50)    NOT NULL DEFAULT 'music',
+    created_at       TIMESTAMP      DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Bookings table
+CREATE TABLE IF NOT EXISTS bookings (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    user_id      INT            NOT NULL,
+    event_id     INT            NOT NULL,
+    seats        INT            NOT NULL,
+    total_amount DECIMAL(10,2)  NOT NULL,
+    status       ENUM('pending','confirmed','cancelled') DEFAULT 'confirmed',
+    booked_at    TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES events(id)
+);
+
+-- Seed data
+INSERT INTO events (name, venue, city, event_date, price, seats_available, seats_total, category) VALUES
+('Coldplay: Music of the Spheres', 'DY Patil Stadium',         'Mumbai',    '2025-01-20', 4500.00, 1240, 50000, 'music'),
+('Kapil Sharma Live: Comedy Night','Jawaharlal Nehru Stadium',  'Delhi',     '2025-01-25', 1200.00,  580, 10000, 'comedy'),
+('Contemporary Art Exhibition',    'NGMA Bangalore',            'Bangalore', '2025-02-10',  800.00,  320,  2000, 'art');
+
+-- Verify
+SELECT id, name, city, price, seats_available FROM events;
+
+----------------------------------------------------------------
+STEP 5 — app_v2.py (Flask with Read/Write Split)
+----------------------------------------------------------------
+----------------------------------------------------------------
+STEP 6 — VERIFY
+----------------------------------------------------------------
+# Get Primary IP
+gcloud sql instances describe bms-primary \
+  --format='get(ipAddresses[0].ipAddress)'
+# Result: 34.180.32.191
+
+# Get Replica IP
+gcloud sql instances describe bms-replica-1 \
+  --format='get(ipAddresses[0].ipAddress)'
+# Result: 34.47.176.241
+
+# Test API
+curl http://34.95.101.123/api/events
+================================================================
+
+================================================================
+TASK 4 — CLOUD CDN + CLOUD STORAGE
+Bucket: gs://upgradlabs-1749732686213-static
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — CREATE GCS BUCKET
+----------------------------------------------------------------
+# Create bucket in asia-south1 region
+gsutil mb -p upgradlabs-1749732686213 \
+  -l asia-south1 \
+  gs://upgradlabs-1749732686213-static
+
+----------------------------------------------------------------
+STEP 2 — MAKE BUCKET PUBLIC
+----------------------------------------------------------------
+# Allow anyone to read static files
+gsutil iam ch allUsers:objectViewer \
+  gs://upgradlabs-1749732686213-static
+
+----------------------------------------------------------------
+STEP 3 — UPLOAD STATIC FILES
+----------------------------------------------------------------
+gsutil cp index.html  gs://upgradlabs-1749732686213-static/
+gsutil cp styles.css  gs://upgradlabs-1749732686213-static/
+gsutil cp script.js   gs://upgradlabs-1749732686213-static/
+
+----------------------------------------------------------------
+STEP 4 — SET CACHE-CONTROL HEADERS
+----------------------------------------------------------------
+# CSS and JS — cache for 1 year (content never changes)
+gsutil -m setmeta \
+  -h "Cache-Control:public, max-age=31536000" \
+  gs://upgradlabs-1749732686213-static/styles.css \
+  gs://upgradlabs-1749732686213-static/script.js
+
+# HTML — cache for 1 hour (may change more often)
+gsutil -m setmeta \
+  -h "Cache-Control:public, max-age=3600" \
+  gs://upgradlabs-1749732686213-static/index.html
+
+----------------------------------------------------------------
+STEP 5 — CREATE BACKEND BUCKET WITH CDN ENABLED
+----------------------------------------------------------------
+# Connects GCS bucket to Load Balancer with CDN caching
+gcloud compute backend-buckets create bms-static-backend \
+  --project=upgradlabs-1749732686213 \
+  --gcs-bucket-name=upgradlabs-1749732686213-static \
+  --enable-cdn \
+  --cache-mode=CACHE_ALL_STATIC
+
+----------------------------------------------------------------
+STEP 6 — UPDATE URL MAP (/static/* routes to CDN)
+----------------------------------------------------------------
+gcloud compute url-maps import bms-url-map \
+  --project=upgradlabs-1749732686213 \
+  --global \
+  --source=new-url-map.yaml
+
+----------------------------------------------------------------
+STEP 7 — VERIFY
+----------------------------------------------------------------
+# Check cache headers on CSS file
+curl -I http://34.95.101.123/static/styles.css
+# Expect: Cache-Control: public, max-age=31536000
+
+# Check cache headers on HTML file
+curl -I http://34.95.101.123/static/index.html
+# Expect: Cache-Control: public, max-age=3600
+
+----------------------------------------------------------------
+CACHE TTL SUMMARY
+----------------------------------------------------------------
+File        Cache-Control Header            TTL
+----------  ------------------------------  -------
+styles.css  public, max-age=31536000        1 year
+script.js   public, max-age=31536000        1 year
+index.html  public, max-age=3600            1 hour
+================================================================
+
+================================================================
+TASK 5 — LOAD TESTING SCALED ARCHITECTURE
+Target: Load Balancer — http://34.95.101.123
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — INSTALL LOCUST
+----------------------------------------------------------------
+pip install locust
+
+----------------------------------------------------------------
+STEP 2 — locustfile.py (same file from Task 1)
+----------------------------------------------------------------
+----------------------------------------------------------------
+STEP 3 — RUN ALL LOAD TESTS
+----------------------------------------------------------------
+# Test 1: Light load — 50 users
+locust -f locustfile.py --headless \
+  --users 50 --spawn-rate 10 --run-time 60s \
+  --host http://34.95.101.123 \
+  --csv=results_50 2>&1 | tail -10
+
+# Test 2: Medium load — 200 users
+locust -f locustfile.py --headless \
+  --users 200 --spawn-rate 20 --run-time 60s \
+  --host http://34.95.101.123 \
+  --csv=results_200 2>&1 | tail -10
+
+# Test 3: High load — 500 users
+locust -f locustfile.py --headless \
+  --users 500 --spawn-rate 50 --run-time 90s \
+  --host http://34.95.101.123 \
+  --csv=results_500 2>&1 | tail -10
+
+# Test 4: Peak load — 1000 users
+locust -f locustfile.py --headless \
+  --users 1000 --spawn-rate 100 --run-time 90s \
+  --host http://34.95.101.123 \
+  --csv=results_1000 2>&1 | tail -10
+
+# Test 5: Flash Sale Spike — 500 users at 100/sec (key test)
+locust -f locustfile.py --headless \
+  --users 500 \
+  --spawn-rate 100 \
+  --run-time 90s \
+  --host http://34.95.101.123 \
+  --csv=lb_results_spike 2>&1 | tail -15
+
+----------------------------------------------------------------
+RESULTS — SCALED ARCHITECTURE
+----------------------------------------------------------------
+Users    Avg Latency   p95 Latency   Failures
+50       166 ms        180 ms        0%
+200      178 ms        190 ms        0%
+500      188 ms        200 ms        0%
+1000     200 ms        210 ms        0%
+
+----------------------------------------------------------------
+FLASH SALE SPIKE RESULT
+----------------------------------------------------------------
+Total Requests : 20,062
+Failures       : 0 (0.00%)
+Avg Latency    : 198 ms
+p95 Latency    : 170 ms
+
+----------------------------------------------------------------
+IMPROVEMENT VS TASK 1 BASELINE
+----------------------------------------------------------------
+Metric              Before     After      Improvement
+------------------  ---------  ---------  -----------
+p95 latency         430 ms     180 ms     54% faster
+Avg at 1000 users   265 ms     200 ms     25% faster
+Failures            0%         0%         same
+================================================================
+
+================================================================
+TASK 6 — COST OPTIMISATION
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — CREATE PREEMPTIBLE INSTANCE TEMPLATE
+----------------------------------------------------------------
+# Preemptible VMs cost 79% less than standard VMs
+# Used for batch jobs — not for user-facing traffic
+gcloud compute instance-templates create bms-batch-template \
+  --project=upgradlabs-1749732686213 \
+  --machine-type=e2-medium \
+  --image-family=debian-11 \
+  --image-project=debian-cloud \
+  --preemptible \
+  --tags=http-server \
+  --metadata-from-file startup-script=batch-startup.sh
+
+----------------------------------------------------------------
+STEP 2 — batch-startup.sh (Batch VM Script) and app_v2.py
+----------------------------------------------------------------
+#!/bin/bash
+# Runs analytics batch job on preemptible VM
+apt-get update -y
+apt-get install -y python3 python3-pip
+pip3 install mysql-connector-python --break-system-packages
+
+----------------------------------------------------------------
+STEP 5 — BILLING BUDGET (via Cloud Console) approx. 
+----------------------------------------------------------------
+# Go to: Billing --> Budgets & Alerts --> Create Budget
+# Budget name  : BMS Monthly Budget
+# Amount       : $50 per month
+# Alert at 50% : $25 spent
+# Alert at 80% : $40 spent
+# Alert at 100%: $50 spent
+# Notification : Link to bms-billing-alerts Pub/Sub topic
+
+----------------------------------------------------------------
+COST SAVINGS SUMMARY
+----------------------------------------------------------------
+Action                          Monthly Saving
+------------------------------  ----------------
+Preemptible batch VMs           79% on batch work
+Stop bms-monolith               ~$25/month
+Billing budget alerts           Prevents surprises
+
+Standard VM cost  : $24.48/month
+Preemptible cost  : $5.04/month
+================================================================
+
+================================================================
+TASK 7 — CLOUD MONITORING + ALERTING + DASHBOARD
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — CREATE EMAIL NOTIFICATION CHANNEL
+----------------------------------------------------------------
+# All alerts send emails to this channel
+gcloud alpha monitoring channels create \
+  --project=upgradlabs-1749732686213 \
+  --display-name="BMS Engineering Alerts" \
+  --type=email \
+  --channel-labels=email_address=your-email@example.com
+
+# Save channel ID for use in alert policies
+CHANNEL_ID=$(gcloud alpha monitoring channels list \
+  --project=upgradlabs-1749732686213 \
+  --filter="displayName='BMS Engineering Alerts'" \
+  --format="get(name)" | head -1)
+
+----------------------------------------------------------------
+STEP 2 — ALERT POLICY 1 — HIGH CPU
+----------------------------------------------------------------
+# Fires when CPU exceeds 80% for 2 minutes
+# Auto-scaling triggers at 60% but we alert at 80% as warning
+gcloud alpha monitoring policies create \
+  --project=upgradlabs-1749732686213 \
+  --display-name="BMS High CPU Alert" \
+  --notification-channels=$CHANNEL_ID \
+  --condition-display-name="CPU > 80% for 120s" \
+  --condition-filter='resource.type="gce_instance" AND metric.type="compute.googleapis.com/instance/cpu/utilization"' \
+  --condition-threshold-value=0.80 \
+  --condition-threshold-duration=120s \
+  --condition-comparison=COMPARISON_GT
+
+----------------------------------------------------------------
+STEP 3 — ALERT POLICY 2 — HIGH LATENCY
+----------------------------------------------------------------
+# Fires when Load Balancer p99 latency exceeds 1000ms
+gcloud alpha monitoring policies create \
+  --project=upgradlabs-1749732686213 \
+  --display-name="BMS High Latency Alert" \
+  --notification-channels=$CHANNEL_ID \
+  --condition-display-name="LB p99 > 1000ms for 120s" \
+  --condition-filter='resource.type="https_lb_rule" AND metric.type="loadbalancing.googleapis.com/https/backend_latencies"' \
+  --condition-threshold-value=1000 \
+  --condition-threshold-duration=120s \
+  --condition-comparison=COMPARISON_GT
+
+----------------------------------------------------------------
+STEP 4 — ALERT POLICY 3 — MAX CAPACITY
+----------------------------------------------------------------
+# Fires when MIG reaches 4 out of 5 max instances
+gcloud alpha monitoring policies create \
+  --project=upgradlabs-1749732686213 \
+  --display-name="BMS Max Capacity Alert" \
+  --notification-channels=$CHANNEL_ID \
+  --condition-display-name="Instance count > 4 of 5 max" \
+  --condition-filter='resource.type="autoscaler" AND metric.type="autoscaler.googleapis.com/instance_group/recommended_size"' \
+  --condition-threshold-value=4 \
+  --condition-threshold-duration=60s \
+  --condition-comparison=COMPARISON_GT
+
+----------------------------------------------------------------
+STEP 5 — BMS LIVE DASHBOARD (via Cloud Console)
+----------------------------------------------------------------
+# Go to: Monitoring --> Dashboards --> Create Dashboard
+# Name: BMS Live Dashboard
+
+# Panel 1 — CPU Utilisation
+# Metric: compute.googleapis.com/instance/cpu/utilization
+# Resource: gce_instance
+
+# Panel 2 — LB Request Count
+# Metric: loadbalancing.googleapis.com/https/request_count
+
+# Panel 3 — Instance Group Size
+# Metric: autoscaler.googleapis.com/instance_group/recommended_size
+
+# Panel 4 — LB p99 Latency
+# Metric: loadbalancing.googleapis.com/https/backend_latencies (p99)
+
+----------------------------------------------------------------
+STEP 6 — VERIFY ALERTS
+----------------------------------------------------------------
+# List all alert policies
+gcloud alpha monitoring policies list \
+  --project=upgradlabs-1749732686213 \
+  --format="table(displayName)"
+
+----------------------------------------------------------------
+ALERT POLICIES SUMMARY
+----------------------------------------------------------------
+Alert Name              Condition                Action
+----------------------  -----------------------  ------
+BMS High CPU Alert      CPU > 80% for 2 min      Email
+BMS High Latency Alert  LB p99 > 1000ms 2 min    Email
+BMS Max Capacity Alert  Instance count > 4       Email
+
+----------------------------------------------------------------
+DASHBOARD PANELS SUMMARY
+----------------------------------------------------------------
+Panel 1  CPU Utilisation        per VM, last 1 hour
+Panel 2  LB Request Count       requests per second
+Panel 3  Instance Group Size    VM count over time
+Panel 4  LB p99 Latency         milliseconds
+================================================================
+

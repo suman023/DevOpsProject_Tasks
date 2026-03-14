@@ -30,6 +30,8 @@ Task 5 load tested the full scaled architecture and achieved p95 latency of 180m
 
 Task 6 created preemptible batch VMs saving 79% on batch workloads, set up Pub/Sub billing alerts, and stopped the unused baseline VM saving around $25 per month. 
 
-Task 7 configured three alert policies for CPU above 80%, latency above 1000ms, and instance count above 4, plus a live dashboard with four monitoring panels. The project proved that auto-scaling, read/write database splitting, CDN caching, and deep health checks together can handle flash sale traffic with zero failures and sub-200ms response times.
+Task 7 configured three alert policies for CPU above 80%, latency above 1000ms, and instance count above 4, plus a live dashboard with four monitoring panels. 
+
+The project proved that auto-scaling, read/write database splitting, CDN caching, and deep health checks together can handle flash sale traffic with zero failures and sub-200ms response times.
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

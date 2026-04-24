@@ -1,0 +1,124 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+
+  "parameters": {
+    "location1":          { "type": "string" },
+    "location2":          { "type": "string" },
+    "eastusVNetName":     { "type": "string" },
+    "eastus2VNetName":    { "type": "string" },
+    "eastusVNetPrefix":   { "type": "string" },
+    "eastus2VNetPrefix":  { "type": "string" },
+    "webSubnetPrefix":    { "type": "string" },
+    "bastionSubnetPrefix":{ "type": "string" },
+    "gwSubnetEastUS":     { "type": "string" },
+    "ws11SubnetPrefix":   { "type": "string" },
+    "fwSubnetPrefix":     { "type": "string" },
+    "gwSubnetEastUS2":    { "type": "string" }
+  },
+
+  "resources": [
+
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2022-07-01",
+      "name": "[parameters('eastusVNetName')]",
+      "location": "[parameters('location1')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [ "[parameters('eastusVNetPrefix')]" ]
+        },
+        "subnets": [
+          {
+            "name": "web-subnet",
+            "properties": { "addressPrefix": "[parameters('webSubnetPrefix')]" }
+          },
+          {
+            "name": "AzureBastionSubnet",
+            "properties": { "addressPrefix": "[parameters('bastionSubnetPrefix')]" }
+          },
+          {
+            "name": "GatewaySubnet",
+            "properties": { "addressPrefix": "[parameters('gwSubnetEastUS')]" }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2022-07-01",
+      "name": "[parameters('eastus2VNetName')]",
+      "location": "[parameters('location2')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [ "[parameters('eastus2VNetPrefix')]" ]
+        },
+        "subnets": [
+          {
+            "name": "ws11-subnet",
+            "properties": { "addressPrefix": "[parameters('ws11SubnetPrefix')]" }
+          },
+          {
+            "name": "AzureFirewallSubnet",
+            "properties": { "addressPrefix": "[parameters('fwSubnetPrefix')]" }
+          },
+          {
+            "name": "GatewaySubnet",
+            "properties": { "addressPrefix": "[parameters('gwSubnetEastUS2')]" }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(parameters('eastusVNetName'), '/EastUS-to-EastUS2')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastus2VNetName'))]"
+      ],
+      "properties": {
+        "remoteVirtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastus2VNetName'))]"
+        },
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "allowGatewayTransit": true,
+        "useRemoteGateways": false
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(parameters('eastus2VNetName'), '/EastUS2-to-EastUS')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastus2VNetName'))]"
+      ],
+      "properties": {
+        "remoteVirtualNetwork": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName'))]"
+        },
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "allowGatewayTransit": false,
+        "useRemoteGateways": false
+      }
+    }
+
+  ],
+
+  "outputs": {
+    "eastusVNetId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName'))]"
+    },
+    "eastus2VNetId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('eastus2VNetName'))]"
+    }
+  }
+}

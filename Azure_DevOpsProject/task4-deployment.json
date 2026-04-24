@@ -1,0 +1,134 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+
+  "parameters": {
+    "location1":          { "type": "string" },
+    "location2":          { "type": "string" },
+    "storageEastUSName":  { "type": "string" },
+    "storageEastUS2Name": { "type": "string" },
+    "fileShareName":      { "type": "string" },
+    "fileShareQuotaGB":   { "type": "int" }
+  },
+
+  "resources": [
+
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('storageEastUSName')]",
+      "location": "[parameters('location1')]",
+      "sku": { "name": "Standard_LRS" },
+      "kind": "StorageV2",
+      "properties": {
+        "supportsHttpsTrafficOnly": true,
+        "minimumTlsVersion": "TLS1_2",
+        "allowBlobPublicAccess": false,
+        "allowSharedKeyAccess": true,
+        "accessTier": "Hot",
+        "networkAcls": {
+          "bypass": "AzureServices",
+          "defaultAction": "Allow"
+        },
+        "encryption": {
+          "services": {
+            "blob": { "enabled": true },
+            "file": { "enabled": true }
+          },
+          "keySource": "Microsoft.Storage"
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2022-09-01",
+      "name": "[concat(parameters('storageEastUSName'), '/default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageEastUSName'))]"
+      ],
+      "properties": {
+        "deleteRetentionPolicy": {
+          "enabled": true,
+          "days": 7
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('storageEastUS2Name')]",
+      "location": "[parameters('location2')]",
+      "sku": { "name": "Standard_GRS" },
+      "kind": "StorageV2",
+      "properties": {
+        "supportsHttpsTrafficOnly": true,
+        "minimumTlsVersion": "TLS1_2",
+        "allowBlobPublicAccess": false,
+        "allowSharedKeyAccess": true,
+        "accessTier": "Hot",
+        "networkAcls": {
+          "bypass": "AzureServices",
+          "defaultAction": "Allow"
+        },
+        "encryption": {
+          "services": {
+            "blob": { "enabled": true },
+            "file": { "enabled": true }
+          },
+          "keySource": "Microsoft.Storage"
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Storage/storageAccounts/fileServices",
+      "apiVersion": "2022-09-01",
+      "name": "[concat(parameters('storageEastUS2Name'), '/default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageEastUS2Name'))]"
+      ],
+      "properties": {
+        "shareDeleteRetentionPolicy": {
+          "enabled": true,
+          "days": 7
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Storage/storageAccounts/fileServices/shares",
+      "apiVersion": "2022-09-01",
+      "name": "[concat(parameters('storageEastUS2Name'), '/default/', parameters('fileShareName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/fileServices', parameters('storageEastUS2Name'), 'default')]"
+      ],
+      "properties": {
+        "shareQuota": "[parameters('fileShareQuotaGB')]",
+        "enabledProtocols": "SMB",
+        "accessTier": "Hot"
+      }
+    }
+
+  ],
+
+  "outputs": {
+    "storageEastUSName": {
+      "type": "string",
+      "value": "[parameters('storageEastUSName')]"
+    },
+    "storageEastUS2Name": {
+      "type": "string",
+      "value": "[parameters('storageEastUS2Name')]"
+    },
+    "fileShareUNCPath": {
+      "type": "string",
+      "value": "[concat('\\\\', parameters('storageEastUS2Name'), '.file.core.windows.net\\', parameters('fileShareName'))]"
+    },
+    "sDriveMountCommand": {
+      "type": "string",
+      "value": "[concat('net use S: \\\\', parameters('storageEastUS2Name'), '.file.core.windows.net\\', parameters('fileShareName'), ' /user:Azure\\', parameters('storageEastUS2Name'), ' <key1> /persistent:yes')]"
+    }
+  }
+}

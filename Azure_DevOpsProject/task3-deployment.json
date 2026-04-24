@@ -1,0 +1,310 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+
+  "parameters": {
+    "location1":       { "type": "string" },
+    "location2":       { "type": "string" },
+    "eastusVNetName":  { "type": "string" },
+    "eastus2VNetName": { "type": "string" }
+  },
+
+  "variables": {
+    "nsgEastUSName":   "NSG-EastUS",
+    "nsgEastUS2Name":  "NSG-EastUS2",
+    "vpnGwEastUS":     "VpnGateway-EastUS",
+    "vpnGwEastUS2":    "VpnGateway-EastUS2",
+    "vpnGwEastUSPIP":  "VpnGw-EastUS-PIP",
+    "vpnGwEastUS2PIP": "VpnGw-EastUS2-PIP",
+    "vpnConn1":        "VpnConn-EastUS-to-EastUS2",
+    "vpnConn2":        "VpnConn-EastUS2-to-EastUS",
+    "sharedKey":       "AzureVpn@Proj2024!"
+  },
+
+  "resources": [
+
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('nsgEastUSName')]",
+      "location": "[parameters('location1')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "Allow-HTTP",
+            "properties": {
+              "priority": 100, "direction": "Inbound", "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "80"
+            }
+          },
+          {
+            "name": "Allow-HTTPS",
+            "properties": {
+              "priority": 110, "direction": "Inbound", "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "443"
+            }
+          },
+          {
+            "name": "Allow-Bastion-RDP-SSH",
+            "properties": {
+              "priority": 120, "direction": "Inbound", "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "10.0.0.0/27", "sourcePortRange": "*",
+              "destinationAddressPrefix": "10.0.1.0/24",
+              "destinationPortRanges": [ "22", "3389" ]
+            }
+          },
+          {
+            "name": "Allow-VNet-EastUS2",
+            "properties": {
+              "priority": 200, "direction": "Inbound", "access": "Allow",
+              "protocol": "*",
+              "sourceAddressPrefix": "10.1.0.0/16", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "*"
+            }
+          },
+          {
+            "name": "Deny-RDP-Internet",
+            "properties": {
+              "priority": 300, "direction": "Inbound", "access": "Deny",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "3389"
+            }
+          },
+          {
+            "name": "Deny-SSH-Internet",
+            "properties": {
+              "priority": 310, "direction": "Inbound", "access": "Deny",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "22"
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('nsgEastUS2Name')]",
+      "location": "[parameters('location2')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "Allow-VNet-EastUS",
+            "properties": {
+              "priority": 100, "direction": "Inbound", "access": "Allow",
+              "protocol": "*",
+              "sourceAddressPrefix": "10.0.0.0/16", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "*"
+            }
+          },
+          {
+            "name": "Deny-RDP-Internet",
+            "properties": {
+              "priority": 200, "direction": "Inbound", "access": "Deny",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "3389"
+            }
+          },
+          {
+            "name": "Deny-SSH-Internet",
+            "properties": {
+              "priority": 210, "direction": "Inbound", "access": "Deny",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet", "sourcePortRange": "*",
+              "destinationAddressPrefix": "*", "destinationPortRange": "22"
+            }
+          },
+          {
+            "name": "Allow-Storage-Outbound",
+            "properties": {
+              "priority": 100, "direction": "Outbound", "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "*", "sourcePortRange": "*",
+              "destinationAddressPrefix": "Storage",
+              "destinationPortRanges": [ "443", "445" ]
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(parameters('eastusVNetName'), '/web-subnet')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgEastUSName'))]"
+      ],
+      "properties": {
+        "addressPrefix": "10.0.1.0/24",
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgEastUSName'))]"
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(parameters('eastus2VNetName'), '/ws11-subnet')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgEastUS2Name'))]"
+      ],
+      "properties": {
+        "addressPrefix": "10.1.1.0/24",
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgEastUS2Name'))]"
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('vpnGwEastUSPIP')]",
+      "location": "[parameters('location1')]",
+      "sku": { "name": "Standard" },
+      "zones": [ "1", "2", "3" ],
+      "properties": { "publicIPAllocationMethod": "Static" }
+    },
+
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('vpnGwEastUS2PIP')]",
+      "location": "[parameters('location2')]",
+      "sku": { "name": "Standard" },
+      "zones": [ "1", "2", "3" ],
+      "properties": { "publicIPAllocationMethod": "Static" }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworkGateways",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('vpnGwEastUS')]",
+      "location": "[parameters('location1')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('vpnGwEastUSPIP'))]"
+      ],
+      "properties": {
+        "gatewayType": "Vpn",
+        "vpnType": "RouteBased",
+        "sku": { "name": "VpnGw2AZ", "tier": "VpnGw2AZ" },
+        "enableBgp": true,
+        "bgpSettings": { "asn": 65001 },
+        "vpnGatewayGeneration": "Generation2",
+        "ipConfigurations": [
+          {
+            "name": "GwIpConfig",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName')), '/subnets/GatewaySubnet')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('vpnGwEastUSPIP'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworkGateways",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('vpnGwEastUS2')]",
+      "location": "[parameters('location2')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('vpnGwEastUS2PIP'))]"
+      ],
+      "properties": {
+        "gatewayType": "Vpn",
+        "vpnType": "RouteBased",
+        "sku": { "name": "VpnGw2AZ", "tier": "VpnGw2AZ" },
+        "enableBgp": true,
+        "bgpSettings": { "asn": 65002 },
+        "vpnGatewayGeneration": "Generation2",
+        "ipConfigurations": [
+          {
+            "name": "GwIpConfig",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('eastus2VNetName')), '/subnets/GatewaySubnet')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('vpnGwEastUS2PIP'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/connections",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('vpnConn1')]",
+      "location": "[parameters('location1')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS'))]",
+        "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS2'))]"
+      ],
+      "properties": {
+        "connectionType": "Vnet2Vnet",
+        "virtualNetworkGateway1": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS'))]"
+        },
+        "virtualNetworkGateway2": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS2'))]"
+        },
+        "sharedKey": "[variables('sharedKey')]",
+        "enableBgp": true
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/connections",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('vpnConn2')]",
+      "location": "[parameters('location2')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS'))]",
+        "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS2'))]"
+      ],
+      "properties": {
+        "connectionType": "Vnet2Vnet",
+        "virtualNetworkGateway1": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS2'))]"
+        },
+        "virtualNetworkGateway2": {
+          "id": "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('vpnGwEastUS'))]"
+        },
+        "sharedKey": "[variables('sharedKey')]",
+        "enableBgp": true
+      }
+    }
+
+  ],
+
+  "outputs": {
+    "vpnGwEastUSPublicIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('vpnGwEastUSPIP'))).ipAddress]"
+    },
+    "vpnGwEastUS2PublicIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('vpnGwEastUS2PIP'))).ipAddress]"
+    }
+  }
+}

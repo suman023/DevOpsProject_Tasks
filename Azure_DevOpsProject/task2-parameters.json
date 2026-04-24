@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+
+  "parameters": {
+
+    "location1": {
+      "value": "eastus"
+    },
+
+    "location2": {
+      "value": "eastus2"
+    },
+
+    "adminUsername": {
+      "value": "azureAdmin"
+    },
+
+    "adminPassword": {
+      "value": "Suman023@"
+    },
+
+    "vmSize": {
+      "value": "Standard_B2ms"
+    },
+
+    "eastusVNetName": {
+      "value": "EastUS-VNet"
+    },
+
+    "eastus2VNetName": {
+      "value": "EastUS2-VNet"
+    },
+
+    "w1PrivateIP": {
+      "value": "10.0.1.4"
+    },
+
+    "w2PrivateIP": {
+      "value": "10.0.1.5"
+    },
+
+    "ws11PrivateIP": {
+      "value": "10.1.1.4"
+    }
+
+  }
+}

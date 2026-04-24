@@ -1,0 +1,519 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+
+  "parameters": {
+    "location1":        { "type": "string" },
+    "location2":        { "type": "string" },
+    "adminUsername":    { "type": "string" },
+    "adminPassword":    { "type": "securestring" },
+    "vmSize":           { "type": "string" },
+    "eastusVNetName":   { "type": "string" },
+    "eastus2VNetName":  { "type": "string" },
+    "w1PrivateIP":      { "type": "string" },
+    "w2PrivateIP":      { "type": "string" },
+    "ws11PrivateIP":    { "type": "string" }
+  },
+
+  "variables": {
+    "lbName":          "WebLoadBalancer",
+    "lbPublicIPName":  "LB-PublicIP",
+    "lbFrontendName":  "LB-FrontEnd",
+    "lbBackendPool":   "WebBackendPool",
+    "lbProbeName":     "httpProbe",
+    "bastionName":     "AzureBastion-EastUS",
+    "bastionPIPName":  "Bastion-PublicIP",
+    "avSetName":       "WebAvailabilitySet",
+    "fwName":          "AzureFirewall-EastUS2",
+    "fwPIPName":       "Firewall-PublicIP",
+    "fwPolicyName":    "FwPolicy-BlockSocial",
+    "rtName":          "RT-WS11-Firewall",
+    "lbId":            "[resourceId('Microsoft.Network/loadBalancers', variables('lbName'))]"
+  },
+
+  "resources": [
+
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('lbPublicIPName')]",
+      "location": "[parameters('location1')]",
+      "sku": { "name": "Standard" },
+      "properties": { "publicIPAllocationMethod": "Static" }
+    },
+
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('bastionPIPName')]",
+      "location": "[parameters('location1')]",
+      "sku": { "name": "Standard" },
+      "properties": { "publicIPAllocationMethod": "Static" }
+    },
+
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('fwPIPName')]",
+      "location": "[parameters('location2')]",
+      "sku": { "name": "Standard" },
+      "properties": { "publicIPAllocationMethod": "Static" }
+    },
+
+    {
+      "type": "Microsoft.Compute/availabilitySets",
+      "apiVersion": "2022-11-01",
+      "name": "[variables('avSetName')]",
+      "location": "[parameters('location1')]",
+      "sku": { "name": "Aligned" },
+      "properties": {
+        "platformFaultDomainCount":  2,
+        "platformUpdateDomainCount": 5
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/loadBalancers",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('lbName')]",
+      "location": "[parameters('location1')]",
+      "sku": { "name": "Standard" },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('lbPublicIPName'))]"
+      ],
+      "properties": {
+        "frontendIPConfigurations": [
+          {
+            "name": "[variables('lbFrontendName')]",
+            "properties": {
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('lbPublicIPName'))]"
+              }
+            }
+          }
+        ],
+        "backendAddressPools": [ { "name": "[variables('lbBackendPool')]" } ],
+        "probes": [
+          {
+            "name": "[variables('lbProbeName')]",
+            "properties": {
+              "protocol": "Http",
+              "port": 80,
+              "requestPath": "/",
+              "intervalInSeconds": 15,
+              "numberOfProbes": 2
+            }
+          }
+        ],
+        "loadBalancingRules": [
+          {
+            "name": "HTTP-Rule",
+            "properties": {
+              "frontendIPConfiguration": { "id": "[concat(variables('lbId'), '/frontendIPConfigurations/', variables('lbFrontendName'))]" },
+              "backendAddressPool":       { "id": "[concat(variables('lbId'), '/backendAddressPools/', variables('lbBackendPool'))]" },
+              "probe":                   { "id": "[concat(variables('lbId'), '/probes/', variables('lbProbeName'))]" },
+              "protocol": "Tcp", "frontendPort": 80, "backendPort": 80, "idleTimeoutInMinutes": 4
+            }
+          },
+          {
+            "name": "HTTPS-Rule",
+            "properties": {
+              "frontendIPConfiguration": { "id": "[concat(variables('lbId'), '/frontendIPConfigurations/', variables('lbFrontendName'))]" },
+              "backendAddressPool":       { "id": "[concat(variables('lbId'), '/backendAddressPools/', variables('lbBackendPool'))]" },
+              "probe":                   { "id": "[concat(variables('lbId'), '/probes/', variables('lbProbeName'))]" },
+              "protocol": "Tcp", "frontendPort": 443, "backendPort": 443, "idleTimeoutInMinutes": 4
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/bastionHosts",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('bastionName')]",
+      "location": "[parameters('location1')]",
+      "sku": { "name": "Standard" },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPIPName'))]"
+      ],
+      "properties": {
+        "enableTunneling": true,
+        "enableIpConnect": true,
+        "ipConfigurations": [
+          {
+            "name": "BastionIpConf",
+            "properties": {
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName')), '/subnets/AzureBastionSubnet')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPIPName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2022-07-01",
+      "name": "w1-nic",
+      "location": "[parameters('location1')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/loadBalancers', variables('lbName'))]" ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[parameters('w1PrivateIP')]",
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName')), '/subnets/web-subnet')]"
+              },
+              "loadBalancerBackendAddressPools": [
+                { "id": "[concat(variables('lbId'), '/backendAddressPools/', variables('lbBackendPool'))]" }
+              ]
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2022-07-01",
+      "name": "w2-nic",
+      "location": "[parameters('location1')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/loadBalancers', variables('lbName'))]" ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[parameters('w2PrivateIP')]",
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('eastusVNetName')), '/subnets/web-subnet')]"
+              },
+              "loadBalancerBackendAddressPools": [
+                { "id": "[concat(variables('lbId'), '/backendAddressPools/', variables('lbBackendPool'))]" }
+              ]
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2022-07-01",
+      "name": "ws11-nic",
+      "location": "[parameters('location2')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[parameters('ws11PrivateIP')]",
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('eastus2VNetName')), '/subnets/ws11-subnet')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2022-11-01",
+      "name": "w1",
+      "location": "[parameters('location1')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', 'w1-nic')]",
+        "[resourceId('Microsoft.Compute/availabilitySets', variables('avSetName'))]"
+      ],
+      "properties": {
+        "availabilitySet": { "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('avSetName'))]" },
+        "hardwareProfile": { "vmSize": "[parameters('vmSize')]" },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2022-Datacenter",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": { "storageAccountType": "Premium_LRS" },
+            "deleteOption": "Delete"
+          }
+        },
+        "osProfile": {
+          "computerName": "w1",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "windowsConfiguration": { "enableAutomaticUpdates": true, "provisionVMAgent": true }
+        },
+        "networkProfile": {
+          "networkInterfaces": [ { "id": "[resourceId('Microsoft.Network/networkInterfaces', 'w1-nic')]" } ]
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2022-11-01",
+      "name": "w2",
+      "location": "[parameters('location1')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', 'w2-nic')]",
+        "[resourceId('Microsoft.Compute/availabilitySets', variables('avSetName'))]"
+      ],
+      "properties": {
+        "availabilitySet": { "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('avSetName'))]" },
+        "hardwareProfile": { "vmSize": "[parameters('vmSize')]" },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2022-Datacenter",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": { "storageAccountType": "Premium_LRS" },
+            "deleteOption": "Delete"
+          }
+        },
+        "osProfile": {
+          "computerName": "w2",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "windowsConfiguration": { "enableAutomaticUpdates": true, "provisionVMAgent": true }
+        },
+        "networkProfile": {
+          "networkInterfaces": [ { "id": "[resourceId('Microsoft.Network/networkInterfaces', 'w2-nic')]" } ]
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2022-11-01",
+      "name": "WS11",
+      "location": "[parameters('location2')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/networkInterfaces', 'ws11-nic')]" ],
+      "properties": {
+        "hardwareProfile": { "vmSize": "[parameters('vmSize')]" },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2022-Datacenter",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": { "storageAccountType": "Premium_LRS" },
+            "deleteOption": "Delete"
+          }
+        },
+        "osProfile": {
+          "computerName": "WS11",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "windowsConfiguration": { "enableAutomaticUpdates": true, "provisionVMAgent": true }
+        },
+        "networkProfile": {
+          "networkInterfaces": [ { "id": "[resourceId('Microsoft.Network/networkInterfaces', 'ws11-nic')]" } ]
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/firewallPolicies",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('fwPolicyName')]",
+      "location": "[parameters('location2')]",
+      "properties": {
+        "sku": { "tier": "Standard" },
+        "threatIntelMode": "Alert",
+        "dnsSettings": { "enableProxy": true }
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(variables('fwPolicyName'), '/BlockSocialMedia')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/firewallPolicies', variables('fwPolicyName'))]"
+      ],
+      "properties": {
+        "priority": 100,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "name": "BlockSocialFQDN",
+            "priority": 100,
+            "action": { "type": "Deny" },
+            "rules": [
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Block-Facebook",
+                "sourceAddresses": [ "10.1.1.0/24" ],
+                "targetFqdns": [ "*.facebook.com", "*.instagram.com", "*.fbcdn.net" ],
+                "protocols": [
+                  { "protocolType": "Http",  "port": 80  },
+                  { "protocolType": "Https", "port": 443 }
+                ]
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Block-Twitter",
+                "sourceAddresses": [ "10.1.1.0/24" ],
+                "targetFqdns": [ "*.twitter.com", "*.x.com", "*.twimg.com" ],
+                "protocols": [
+                  { "protocolType": "Http",  "port": 80  },
+                  { "protocolType": "Https", "port": 443 }
+                ]
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Block-TikTok",
+                "sourceAddresses": [ "10.1.1.0/24" ],
+                "targetFqdns": [ "*.tiktok.com", "*.tiktokcdn.com" ],
+                "protocols": [
+                  { "protocolType": "Http",  "port": 80  },
+                  { "protocolType": "Https", "port": 443 }
+                ]
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Block-LinkedIn",
+                "sourceAddresses": [ "10.1.1.0/24" ],
+                "targetFqdns": [ "*.linkedin.com", "*.licdn.com" ],
+                "protocols": [
+                  { "protocolType": "Http",  "port": 80  },
+                  { "protocolType": "Https", "port": 443 }
+                ]
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Block-Reddit-YouTube",
+                "sourceAddresses": [ "10.1.1.0/24" ],
+                "targetFqdns": [ "*.reddit.com", "*.youtube.com", "*.ytimg.com" ],
+                "protocols": [
+                  { "protocolType": "Http",  "port": 80  },
+                  { "protocolType": "Https", "port": 443 }
+                ]
+              }
+            ]
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "name": "AllowAllOutbound",
+            "priority": 200,
+            "action": { "type": "Allow" },
+            "rules": [
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Allow-All-Web",
+                "sourceAddresses": [ "10.1.1.0/24" ],
+                "targetFqdns": [ "*" ],
+                "protocols": [
+                  { "protocolType": "Http",  "port": 80  },
+                  { "protocolType": "Https", "port": 443 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/azureFirewalls",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('fwName')]",
+      "location": "[parameters('location2')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('fwPIPName'))]",
+        "[resourceId('Microsoft.Network/firewallPolicies/ruleCollectionGroups', variables('fwPolicyName'), 'BlockSocialMedia')]"
+      ],
+      "properties": {
+        "sku": { "name": "AZFW_VNet", "tier": "Standard" },
+        "firewallPolicy": {
+          "id": "[resourceId('Microsoft.Network/firewallPolicies', variables('fwPolicyName'))]"
+        },
+        "ipConfigurations": [
+          {
+            "name": "FwIpConfig",
+            "properties": {
+              "subnet": {
+                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('eastus2VNetName')), '/subnets/AzureFirewallSubnet')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('fwPIPName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/routeTables",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('rtName')]",
+      "location": "[parameters('location2')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/azureFirewalls', variables('fwName'))]"
+      ],
+      "properties": {
+        "disableBgpRoutePropagation": false,
+        "routes": [
+          {
+            "name": "Force-To-Firewall",
+            "properties": {
+              "addressPrefix": "0.0.0.0/0",
+              "nextHopType": "VirtualAppliance",
+              "nextHopIpAddress": "[reference(resourceId('Microsoft.Network/azureFirewalls', variables('fwName'))).ipConfigurations[0].properties.privateIPAddress]"
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(parameters('eastus2VNetName'), '/ws11-subnet')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/routeTables', variables('rtName'))]"
+      ],
+      "properties": {
+        "addressPrefix": "10.1.1.0/24",
+        "routeTable": {
+          "id": "[resourceId('Microsoft.Network/routeTables', variables('rtName'))]"
+        }
+      }
+    }
+
+  ],
+
+  "outputs": {
+    "loadBalancerPublicIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('lbPublicIPName'))).ipAddress]"
+    },
+    "firewallPrivateIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/azureFirewalls', variables('fwName'))).ipConfigurations[0].properties.privateIPAddress]"
+    }
+  }
+}

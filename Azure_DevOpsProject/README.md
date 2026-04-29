@@ -66,8 +66,8 @@ Deployed resilient storage with three access methods and a file share mapped as 
                         INTERNET
                            |
                     ┌──────┴──────┐
-                    │ Load Balancer│  ← Public IP
-                    │  HTTP / HTTPS│
+                    │Load Balancer│  ← Public IP
+                    │ HTTP / HTTPS│
                     └──────┬──────┘
                            │
     ┌──────────────────────┼──────────────────────────┐

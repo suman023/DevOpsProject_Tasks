@@ -35,3 +35,19 @@ Task 7 configured three alert policies for CPU above 80%, latency above 1000ms, 
 The project proved that auto-scaling, read/write database splitting, CDN caching, and deep health checks together can handle flash sale traffic with zero failures and sub-200ms response times.
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+☁️ Azure Tasks Summary:
+
+A two-region Azure cloud infrastructure connecting East US and East US 2 using VPN, with web servers, a backend server, firewall, and resilient storage — all deployed via ARM templates.
+
+Task 1 — Virtual Networks
+Created two isolated VNets and connected them via peering.
+
+Task 2 — Virtual Machines, Load Balancer, Bastion, Firewall
+Deployed 3 VMs with high availability, secure admin access, and social media blocking.
+
+Task 3 — NSGs and VPN Gateways
+Secured both subnets and created an encrypted tunnel between regions.
+
+Task 4 — Storage and S: Drive
+Deployed resilient storage with three access methods and a file share mapped as S: drive on WS11.

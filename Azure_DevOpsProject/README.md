@@ -59,6 +59,7 @@ Deployed resilient storage with three access methods and a file share mapped as 
 | **ws11-share** | 100 GB SMB Share — Mapped as `S:` on WS11 (`/persistent:yes`) |
 
 <br/>
+
 ## Architecture Diagram
 
 ```
